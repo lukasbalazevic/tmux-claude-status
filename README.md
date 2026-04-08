@@ -6,9 +6,17 @@ Uses Claude Code [hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) t
 
 | State | Status bar | `prefix + w` |
 |-------|-----------|--------------|
-| **Waiting** — permission prompt or question | ![yellow badge](https://img.shields.io/badge/⚠_Claude:_1-black?style=flat-square&labelColor=yellow) | `[Q]` red |
+| **Waiting** — permission prompt or question | ![yellow badge](https://img.shields.io/badge/⚠_myapp_(main:2)-black?style=flat-square&labelColor=yellow) | `[Q]` red |
 | **Done** — finished working | ![white badge](https://img.shields.io/badge/✓_Done-black?style=flat-square&labelColor=white) | `[✓]` cyan |
 | **Working** — executing tools | _(empty)_ | _(no marker)_ |
+
+The status bar shows the **window name** and **session:index** for up to 2 waiting windows. If 3 or more windows need attention, the first 2 are shown by name with a `+N` overflow badge. Use `prefix + w` to jump to any marked window.
+
+```
+1 window:   ⚠ myapp (main:2)
+2 windows:  ⚠ myapp (main:2)  ⚠ server (work:0)
+3 windows:  ⚠ myapp (main:2)  ⚠ server (work:0)  +1
+```
 
 The **Done** indicator auto-clears after 10 seconds.
 
@@ -59,12 +67,7 @@ tmux source-file ~/.tmux.conf
 
 The default colors are designed for a green tmux status bar (`bg=green,fg=black`). If your theme is different, edit the style tags in `tmux-claude-status.conf`.
 
-**Status bar** — change `bg=yellow` / `bg=white` to whatever contrasts with your bar:
-
-```
-#[bg=yellow]#[fg=black]#[bold] ⚠ Claude: #{@claude_waiting_count} #[default]
-#[bg=white]#[fg=black]#[bold] ✓ Done #[default]
-```
+**Status bar** — the waiting pills are built by the hook script in `tmux-claude-status.sh` (search for `#[bg=yellow]`). The done pill is in `tmux-claude-status.conf`. Change `bg=yellow` / `bg=white` to whatever contrasts with your bar.
 
 **Choose-tree** (`prefix + w`) — change `fg=red` / `fg=cyan`:
 
@@ -84,7 +87,7 @@ The hook script receives JSON events from Claude Code and sets tmux window-level
 
 Global options drive the status bar:
 
-- `@claude_waiting_count` — number of windows waiting for input
+- `@claude_waiting_text` — pre-styled status bar text showing waiting window names + session:index (up to 2, then `+N` overflow)
 - `@claude_done_msg` — flag for showing the "Done" badge
 
 ### Event mapping
