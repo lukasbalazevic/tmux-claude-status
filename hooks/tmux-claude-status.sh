@@ -53,15 +53,23 @@ notify() {
 }
 
 set_waiting() {
+  # Fire the banner only on state CHANGE — Claude Code emits both
+  # Notification(permission_prompt) and PermissionRequest for the same
+  # event, which would otherwise produce a double banner before group
+  # dedup catches up.
+  local was
+  was="$(tmux show-options -wqv -t "$target_window" @claude_waiting 2>/dev/null || true)"
   tmux set-option -wq -t "$target_window" @claude_done ""
   tmux set-option -wq -t "$target_window" @claude_waiting 1
-  notify waiting
+  [ -z "$was" ] && notify waiting
 }
 
 set_done() {
+  local was
+  was="$(tmux show-options -wqv -t "$target_window" @claude_done 2>/dev/null || true)"
   tmux set-option -wq -t "$target_window" @claude_waiting ""
   tmux set-option -wq -t "$target_window" @claude_done 1
-  notify done
+  [ -z "$was" ] && notify done
   # Auto-clear after 10 seconds
   tmux run-shell -b -d 10 \
     "tmux set-option -wq -t '${target_window}' @claude_done ''; \
@@ -71,6 +79,11 @@ set_done() {
 clear_all() {
   tmux set-option -wq -t "$target_window" @claude_waiting ""
   tmux set-option -wq -t "$target_window" @claude_done ""
+  # Also dismiss any standing macOS banner — without this, typing in the
+  # tmux session clears the tmux pill but leaves the banner in place.
+  if command -v terminal-notifier >/dev/null 2>&1; then
+    terminal-notifier -remove "claude-${target_window}" >/dev/null 2>&1 || true
+  fi
 }
 
 case "$event" in
