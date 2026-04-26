@@ -11,6 +11,31 @@ target_window="$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}:#{wind
 NOTIFY_CONFIG="${TMUX_CLAUDE_STATUS_CONFIG:-$HOME/.claude/hooks/tmux-claude-status.config.json}"
 NOTIFY_OPEN_SCRIPT="${TMUX_CLAUDE_STATUS_OPEN:-$HOME/.claude/hooks/tmux-claude-status-open.sh}"
 
+is_user_focused() {
+  # True when (a) the configured terminal app is the macOS frontmost app
+  # AND (b) some attached tmux client's currently-shown window equals
+  # target_window. Together: the user is already looking at the prompt.
+  local term_app="$1"
+  command -v lsappinfo >/dev/null 2>&1 || return 1
+
+  local front_asn front_name
+  front_asn="$(lsappinfo front 2>/dev/null)"
+  [ -n "$front_asn" ] || return 1
+  front_name="$(lsappinfo info -only name "$front_asn" 2>/dev/null \
+                | sed -E 's/.*"([^"]+)"$/\1/')"
+  [ "$front_name" = "$term_app" ] || return 1
+
+  local clients
+  clients="$(tmux list-clients -F '#{client_name}' 2>/dev/null)" || return 1
+  local c cw
+  while IFS= read -r c; do
+    [ -z "$c" ] && continue
+    cw="$(tmux display-message -t "$c" -p '#{session_name}:#{window_index}' 2>/dev/null || true)"
+    [ "$cw" = "$target_window" ] && return 0
+  done <<< "$clients"
+  return 1
+}
+
 notify() {
   [ -r "$NOTIFY_CONFIG" ] || return 0
   command -v terminal-notifier >/dev/null 2>&1 || return 0
@@ -25,6 +50,15 @@ notify() {
   local idx="${target_window##*:}"
   local term_app
   term_app="$(jq -r '.terminal_app // "iTerm"' "$NOTIFY_CONFIG" 2>/dev/null)"
+
+  # When `suppress_when_focused` is true (default), skip the banner if the
+  # user is already on the originating Claude pane in the foreground
+  # terminal. Set to false to always banner.
+  local suppress
+  suppress="$(jq -r '.suppress_when_focused // true' "$NOTIFY_CONFIG" 2>/dev/null)"
+  if [ "$suppress" = "true" ] && is_user_focused "$term_app"; then
+    return 0
+  fi
 
   render() {
     local t="$1"

@@ -1,5 +1,6 @@
 {
   "terminal_app": "Ghostty",
+  "suppress_when_focused": true,
   "waiting": {
     "title": "Claude Code",
     "subtitle": "⚠ {target_window}",
