@@ -92,7 +92,7 @@ chmod +x ~/.claude/hooks/tmux-claude-status-*.sh
 cp tmux-claude-status.config.example.json ~/.claude/hooks/tmux-claude-status.config.json
 ```
 
-Then edit `~/.claude/hooks/tmux-claude-status.config.json` — set `terminal_app` to your terminal (`Ghostty`, `iTerm`, `Terminal`, `Alacritty`, …) and adjust copy / sound to taste.
+Then edit `~/.claude/hooks/tmux-claude-status.config.json` — set `terminal_app` to your terminal (`Ghostty`, `Terminal`, others may work but only those two are verified — see "Spawn command" below) and adjust copy / sound to taste.
 
 The notifications are **opt-in by config presence**: without `tmux-claude-status.config.json`, or without `terminal-notifier` on `PATH`, the hook script behaves exactly like the upstream original — tmux pills only.
 
@@ -134,8 +134,24 @@ Sounds: `Ping`, `Glass`, `Hero`, `Funk`, `Basso`, `Bottle`, `Frog`, `Morse`, `Po
 
 1. Foregrounds the configured `terminal_app` (always — even when the switch succeeds).
 2. `tmux switch-client -t session:index` — retargets your already-attached tmux client across sessions/windows on the same tmux server.
-3. **Fallback** when no client is attached: spawns a new terminal-app window via `open -na "$terminal_app" --args -e "tmux attach -t $session \; select-window -t $session:$index"`.
+3. **Fallback** when no client is attached: runs the configured `spawn_command` (see below) to launch a fresh terminal window with `tmux attach`.
 4. **Dead-session** (target killed since the banner fired): shows a "Session X no longer exists" notification instead of failing silently.
+
+### Spawn command (no-client fallback)
+
+Configurable via `spawn_command` in the JSON config. Templated string with placeholders `{app}`, `{session}`, `{target_window}`, `{window_index}`. Rendered then run via `/bin/sh -c`. If the field is absent, defaults to the Ghostty value below.
+
+**Verified values:**
+
+```jsonc
+// Ghostty (default — no need to set explicitly)
+"spawn_command": "open -na {app} --args -e \"tmux attach -t {session} \\; select-window -t {target_window}\""
+
+// Terminal.app (uses AppleScript do script)
+"spawn_command": "osascript -e 'tell application \"Terminal\" to do script \"tmux attach -t {session} \\; select-window -t {target_window}\"'"
+```
+
+For other terminals (iTerm, Alacritty, Wezterm, Kitty…) you'd need to write your own — the script doesn't ship known-good values for them. If you do work one out, PRs welcome.
 
 ### Auto-dismiss
 
@@ -146,7 +162,7 @@ When you focus the originating pane via tmux without tapping the banner, the `pa
 - **Multi-window tmux clients.** `switch-client` retargets the most-recently-active client, not a specific terminal-app window. If you run multiple tmux clients side-by-side, you can't pre-select which one switches.
 - **Multi-server tmux.** Only works when your terminal-app's tmux client and Claude Code share a tmux server (same socket / user). Cross-server switches aren't possible.
 - **Glance without focus.** `pane-focus-in` only fires on actual pane focus changes. If you switch to a *window* that already has a non-Claude pane focused, the auto-dismiss won't run — you'd need to focus the Claude pane explicitly. Banners do still clear when Claude itself emits `UserPromptSubmit` / `PostToolUse` after you engage.
-- **Ghostty fallback opens a second instance.** Ghostty's AppleScript dictionary doesn't expose `do script`, so the no-client fallback uses `open -na` which spawns a new Ghostty process. iTerm / Terminal.app would not have this issue, but the script doesn't currently special-case them.
+- **Ghostty fallback opens a second instance.** Ghostty's AppleScript dictionary doesn't expose `do script`, so the default `spawn_command` uses `open -na` which spawns a new Ghostty process. The Terminal.app variant doesn't have this issue. Other terminals depend on what `spawn_command` you write.
 
 ## How it works
 
