@@ -201,14 +201,20 @@ clear_all() {
   log "clear_all target=$target_window"
   tmux set-option -wq -t "$target_window" @claude_waiting ""
   tmux set-option -wq -t "$target_window" @claude_done ""
-  # Reset notify-dedup state too — user has engaged, the next done/waiting
-  # is a fresh state worth a fresh banner.
-  tmux set-option -wq -t "$target_window" @claude_notified_done ""
   # Also dismiss any standing macOS banner — without this, typing in the
   # tmux session clears the tmux pill but leaves the banner in place.
   if command -v terminal-notifier >/dev/null 2>&1; then
     terminal-notifier -remove "claude-${target_window}" >/dev/null 2>&1 || true
   fi
+}
+
+# Only reset notify-dedup on REAL user engagement (UserPromptSubmit /
+# SessionEnd). PostToolUse fires every time Claude finishes an internal
+# tool, which isn't engagement — clearing dedup there would make a
+# follow-up Stop re-banner mid-conversation.
+clear_dedup() {
+  log "clear_dedup target=$target_window"
+  tmux set-option -wq -t "$target_window" @claude_notified_done ""
 }
 
 log "ENTER event='$event' target=$target_window TMUX_PANE=$TMUX_PANE"
@@ -234,11 +240,16 @@ case "$event" in
   Stop|StopFailure)
     set_done
     ;;
-  UserPromptSubmit|PostToolUse|PostToolUseFailure)
+  UserPromptSubmit)
+    clear_all
+    clear_dedup
+    ;;
+  PostToolUse|PostToolUseFailure)
     clear_all
     ;;
   SessionEnd)
     clear_all
+    clear_dedup
     ;;
 esac
 
