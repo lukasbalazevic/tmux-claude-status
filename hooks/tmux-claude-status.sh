@@ -8,14 +8,60 @@ input="$(cat)"
 event="$(jq -r '.hook_event_name // empty' <<<"$input")"
 target_window="$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}:#{window_index}')"
 
+NOTIFY_CONFIG="${TMUX_CLAUDE_STATUS_CONFIG:-$HOME/.claude/hooks/tmux-claude-status.config.json}"
+NOTIFY_OPEN_SCRIPT="${TMUX_CLAUDE_STATUS_OPEN:-$HOME/.claude/hooks/tmux-claude-status-open.sh}"
+
+notify() {
+  [ -r "$NOTIFY_CONFIG" ] || return 0
+  command -v terminal-notifier >/dev/null 2>&1 || return 0
+  [ -x "$NOTIFY_OPEN_SCRIPT" ] || return 0
+
+  local kind="$1"
+  local cfg
+  cfg="$(jq -c --arg k "$kind" '.[$k] // empty' "$NOTIFY_CONFIG" 2>/dev/null)" || return 0
+  [ -n "$cfg" ] || return 0
+
+  local sess="${target_window%%:*}"
+  local idx="${target_window##*:}"
+  local term_app
+  term_app="$(jq -r '.terminal_app // "iTerm"' "$NOTIFY_CONFIG" 2>/dev/null)"
+
+  render() {
+    local t="$1"
+    t="${t//\{target_window\}/$target_window}"
+    t="${t//\{session\}/$sess}"
+    t="${t//\{window_index\}/$idx}"
+    printf '%s' "$t"
+  }
+
+  local title subtitle message sound
+  title="$(render   "$(jq -r '.title    // "Claude Code"' <<<"$cfg")")"
+  subtitle="$(render "$(jq -r '.subtitle // ""'           <<<"$cfg")")"
+  message="$(render  "$(jq -r '.message  // ""'           <<<"$cfg")")"
+  sound="$(jq -r '.sound // ""' <<<"$cfg")"
+
+  local args=(
+    -title   "$title"
+    -message "$message"
+    -group   "claude-${target_window}"
+    -execute "${NOTIFY_OPEN_SCRIPT} '${target_window}' '${term_app}'"
+  )
+  [ -n "$subtitle" ] && args+=( -subtitle "$subtitle" )
+  [ -n "$sound" ]    && args+=( -sound    "$sound"    )
+
+  terminal-notifier "${args[@]}" >/dev/null 2>&1 || true
+}
+
 set_waiting() {
   tmux set-option -wq -t "$target_window" @claude_done ""
   tmux set-option -wq -t "$target_window" @claude_waiting 1
+  notify waiting
 }
 
 set_done() {
   tmux set-option -wq -t "$target_window" @claude_waiting ""
   tmux set-option -wq -t "$target_window" @claude_done 1
+  notify done
   # Auto-clear after 10 seconds
   tmux run-shell -b -d 10 \
     "tmux set-option -wq -t '${target_window}' @claude_done ''; \

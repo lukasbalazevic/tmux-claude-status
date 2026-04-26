@@ -78,6 +78,73 @@ The default colors are designed for a green tmux status bar (`bg=green,fg=black`
 
 > **Gotcha:** Don't use commas inside `#[...]` style tags (e.g. `#[fg=red,bold]`). Tmux's `#{?...}` conditional parser treats commas as delimiters. Use separate tags instead: `#[fg=red]#[bold]`.
 
+## macOS notifications (optional)
+
+Get a native banner — with sound, a tap target that switches your tmux client to the firing window, and auto-dismiss when you focus the pane manually.
+
+### Install
+
+```bash
+brew install terminal-notifier
+cp hooks/tmux-claude-status-open.sh  ~/.claude/hooks/
+cp hooks/tmux-claude-status-clear.sh ~/.claude/hooks/
+chmod +x ~/.claude/hooks/tmux-claude-status-*.sh
+cp tmux-claude-status.config.example.json ~/.claude/hooks/tmux-claude-status.config.json
+```
+
+Then edit `~/.claude/hooks/tmux-claude-status.config.json` — set `terminal_app` to your terminal (`Ghostty`, `iTerm`, `Terminal`, `Alacritty`, …) and adjust copy / sound to taste.
+
+The notifications are **opt-in by config presence**: without `tmux-claude-status.config.json`, or without `terminal-notifier` on `PATH`, the hook script behaves exactly like the upstream original — tmux pills only.
+
+If you didn't already source the full `tmux-claude-status.conf`, add these two lines to `~/.tmux.conf` to enable auto-dismiss (`focus-events on` is required for `pane-focus-in` to actually fire):
+
+```tmux
+set -g focus-events on
+set-hook -g pane-focus-in 'run-shell -b "~/.claude/hooks/tmux-claude-status-clear.sh \"#{session_name}:#{window_index}\""'
+```
+
+### Config
+
+```json
+{
+  "terminal_app": "Ghostty",
+  "waiting": {
+    "title": "Claude Code",
+    "subtitle": "⚠ {target_window}",
+    "message": "Claude needs your input",
+    "sound": "Ping"
+  },
+  "done": {
+    "title": "Claude Code",
+    "subtitle": "✓ {target_window}",
+    "message": "Claude finished",
+    "sound": "Glass"
+  }
+}
+```
+
+Templatable placeholders in `subtitle` / `message`: `{target_window}` (e.g. `main:2`), `{session}`, `{window_index}`.
+
+Sounds: `Ping`, `Glass`, `Hero`, `Funk`, `Basso`, `Bottle`, `Frog`, `Morse`, `Pop`, `Purr`, `Sosumi`, `Submarine`, `Tink`. Empty / omitted → silent banner.
+
+### Tap behaviour
+
+1. Foregrounds the configured `terminal_app` (always — even when the switch succeeds).
+2. `tmux switch-client -t session:index` — retargets your already-attached tmux client across sessions/windows on the same tmux server.
+3. **Fallback** when no client is attached: spawns a new terminal-app window via `open -na "$terminal_app" --args -e "tmux attach -t $session \; select-window -t $session:$index"`.
+4. **Dead-session** (target killed since the banner fired): shows a "Session X no longer exists" notification instead of failing silently.
+
+### Auto-dismiss
+
+When you focus the originating pane via tmux without tapping the banner, the `pane-focus-in` hook clears the tmux flags and runs `terminal-notifier -remove "claude-$target_window"` to dismiss the Notification Center entry.
+
+### Caveats
+
+- **Multi-window tmux clients.** `switch-client` retargets the most-recently-active client, not a specific terminal-app window. If you run multiple tmux clients side-by-side, you can't pre-select which one switches.
+- **Multi-server tmux.** Only works when your terminal-app's tmux client and Claude Code share a tmux server (same socket / user). Cross-server switches aren't possible.
+- **Glance without focus.** `pane-focus-in` only fires on actual pane focus changes. If you switch to a *window* that already has a non-Claude pane focused, the auto-dismiss won't run — you'd need to focus the Claude pane explicitly. Banners do still clear when Claude itself emits `UserPromptSubmit` / `PostToolUse` after you engage.
+- **Ghostty fallback opens a second instance.** Ghostty's AppleScript dictionary doesn't expose `do script`, so the no-client fallback uses `open -na` which spawns a new Ghostty process. iTerm / Terminal.app would not have this issue, but the script doesn't currently special-case them.
+
 ## How it works
 
 The hook script receives JSON events from Claude Code and sets tmux window-level options:

@@ -1,0 +1,15 @@
+{
+  "terminal_app": "Ghostty",
+  "waiting": {
+    "title": "Claude Code",
+    "subtitle": "⚠ {target_window}",
+    "message": "Claude needs your input",
+    "sound": "Ping"
+  },
+  "done": {
+    "title": "Claude Code",
+    "subtitle": "✓ {target_window}",
+    "message": "Claude finished",
+    "sound": "Glass"
+  }
+}
