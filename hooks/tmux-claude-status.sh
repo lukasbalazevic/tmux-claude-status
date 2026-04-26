@@ -38,8 +38,14 @@ log() {
 
 is_user_focused() {
   # True when (a) the configured terminal app is the macOS frontmost app
-  # AND (b) some attached tmux client's currently-shown window equals
-  # target_window. Together: the user is already looking at the prompt.
+  # AND (b) a tmux client whose terminal has focus is currently showing
+  # `target_window`. Together: the user is literally looking at the prompt.
+  #
+  # The focused-client check matters when multiple tmux clients are
+  # attached (e.g. two Ghostty windows on different sessions). Without it,
+  # we'd incorrectly suppress just because *some* client is on the target.
+  # tmux 3.6 exposes focus state in `#{client_flags}` (contains "focused"
+  # token); `#{client_focused}` doesn't expand on this version.
   local term_app="$1"
   command -v lsappinfo >/dev/null 2>&1 || return 1
 
@@ -52,11 +58,13 @@ is_user_focused() {
 
   local clients
   clients="$(tmux list-clients -F '#{client_name}' 2>/dev/null)" || return 1
-  local c cw
+  local c cw flags
   while IFS= read -r c; do
     [ -z "$c" ] && continue
     cw="$(tmux display-message -t "$c" -p '#{session_name}:#{window_index}' 2>/dev/null || true)"
-    [ "$cw" = "$target_window" ] && return 0
+    [ "$cw" = "$target_window" ] || continue
+    flags="$(tmux display-message -t "$c" -p '#{client_flags}' 2>/dev/null || true)"
+    case ",${flags}," in *,focused,*) return 0 ;; esac
   done <<< "$clients"
   return 1
 }
@@ -114,11 +122,38 @@ notify() {
   log "notify($kind) target=$target_window FIRED exit=$?"
 }
 
+# Per-target_window lock to serialize the read-then-write in set_waiting /
+# set_done across concurrent hook PIDs. Claude Code spawns the hook once
+# per registered event, and Notification(permission_prompt) +
+# PermissionRequest fire near-simultaneously for the same prompt. Without
+# this lock, both PIDs read prior=='' before either writes 1, both fire
+# notify, two banners appear. mkdir is atomic on POSIX.
+acquire_lock() {
+  local lock_dir="/tmp/tmux-claude-status.${target_window//:/-}.lock"
+  local waited_ms=0
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    # If the holder PID is gone (crash or signal), reclaim the lock.
+    local owner_pid
+    owner_pid="$(cat "$lock_dir/pid" 2>/dev/null || true)"
+    if [ -n "$owner_pid" ] && ! kill -0 "$owner_pid" 2>/dev/null; then
+      log "acquire_lock reclaiming stale lock owner=$owner_pid"
+      rm -rf "$lock_dir" 2>/dev/null || true
+      continue
+    fi
+    sleep 0.02
+    waited_ms=$((waited_ms + 20))
+    if [ "$waited_ms" -ge 2000 ]; then
+      log "acquire_lock TIMEOUT after 2s — proceeding without lock"
+      return 1
+    fi
+  done
+  echo "$$" > "$lock_dir/pid" 2>/dev/null || true
+  trap 'rm -rf "/tmp/tmux-claude-status.${target_window//:/-}.lock" 2>/dev/null || true' EXIT
+  return 0
+}
+
 set_waiting() {
-  # Fire the banner only on state CHANGE — Claude Code emits both
-  # Notification(permission_prompt) and PermissionRequest for the same
-  # event, which would otherwise produce a double banner before group
-  # dedup catches up.
+  acquire_lock
   local was
   was="$(tmux show-options -wqv -t "$target_window" @claude_waiting 2>/dev/null || true)"
   log "set_waiting target=$target_window prior_waiting='${was}'"
@@ -133,6 +168,7 @@ set_waiting() {
 }
 
 set_done() {
+  acquire_lock
   local was
   was="$(tmux show-options -wqv -t "$target_window" @claude_done 2>/dev/null || true)"
   log "set_done target=$target_window prior_done='${was}'"
