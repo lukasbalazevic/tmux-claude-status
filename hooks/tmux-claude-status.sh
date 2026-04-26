@@ -81,6 +81,8 @@ notify() {
 
   local sess="${target_window%%:*}"
   local idx="${target_window##*:}"
+  local wname
+  wname="$(tmux display-message -p -t "$target_window" '#{window_name}' 2>/dev/null || true)"
   local term_app
   term_app="$(jq -r '.terminal_app // "iTerm"' "$NOTIFY_CONFIG" 2>/dev/null)"
 
@@ -99,6 +101,7 @@ notify() {
     t="${t//\{target_window\}/$target_window}"
     t="${t//\{session\}/$sess}"
     t="${t//\{window_index\}/$idx}"
+    t="${t//\{window_name\}/$wname}"
     printf '%s' "$t"
   }
 
@@ -107,6 +110,7 @@ notify() {
   subtitle="$(render "$(jq -r '.subtitle // ""'           <<<"$cfg")")"
   message="$(render  "$(jq -r '.message  // ""'           <<<"$cfg")")"
   sound="$(jq -r '.sound // ""' <<<"$cfg")"
+  log "notify($kind) rendered title='$title' subtitle='$subtitle' message='$message' wname='$wname'"
 
   local args=(
     -title   "$title"

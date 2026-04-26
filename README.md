@@ -126,7 +126,7 @@ set-hook -g pane-focus-in 'run-shell -b "~/.claude/hooks/tmux-claude-status-clea
 
 `suppress_when_focused` (default `true`) skips the banner when the configured terminal is already the macOS frontmost app **and** an attached tmux client is currently showing the originating window — i.e. you'd see the prompt anyway, no point in a banner. Set to `false` to always banner. Detection uses `lsappinfo` (no Accessibility permission required) plus `tmux list-clients` / `display-message`.
 
-Templatable placeholders in `subtitle` / `message`: `{target_window}` (e.g. `main:2`), `{session}`, `{window_index}`.
+Templatable placeholders in `title` / `subtitle` / `message`: `{target_window}` (e.g. `main:2`), `{session}`, `{window_index}`, `{window_name}` (the tmux window name — defaults to the running command unless you've renamed the window).
 
 Sounds: `Ping`, `Glass`, `Hero`, `Funk`, `Basso`, `Bottle`, `Frog`, `Morse`, `Pop`, `Purr`, `Sosumi`, `Submarine`, `Tink`. Empty / omitted → silent banner.
 
