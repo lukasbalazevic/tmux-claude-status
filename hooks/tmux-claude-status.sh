@@ -169,18 +169,25 @@ set_waiting() {
 
 set_done() {
   acquire_lock
-  local was
-  was="$(tmux show-options -wqv -t "$target_window" @claude_done 2>/dev/null || true)"
-  log "set_done target=$target_window prior_done='${was}'"
+  # Use a separate `@claude_notified_done` flag for banner dedup. The
+  # visible `@claude_done` pill auto-clears after 10s (preserves upstream
+  # UX — choose-tree marker doesn't linger forever), but the notify-dedup
+  # flag persists until `clear_all` so Stop followed by an idle_prompt
+  # 60s later doesn't double-banner. clear_all resets both.
+  local was_notified
+  was_notified="$(tmux show-options -wqv -t "$target_window" @claude_notified_done 2>/dev/null || true)"
+  log "set_done target=$target_window prior_notified='${was_notified}'"
   tmux set-option -wq -t "$target_window" @claude_waiting ""
   tmux set-option -wq -t "$target_window" @claude_done 1
-  if [ -z "$was" ]; then
+  if [ -z "$was_notified" ]; then
+    tmux set-option -wq -t "$target_window" @claude_notified_done 1
     log "set_done target=$target_window calling notify (state CHANGE)"
     notify done
   else
-    log "set_done target=$target_window SKIP notify (already done)"
+    log "set_done target=$target_window SKIP notify (already notified)"
   fi
-  # Auto-clear after 10 seconds
+  # Auto-clear the visible done pill after 10s. Notify-dedup state
+  # (@claude_notified_done) deliberately is NOT cleared here.
   tmux run-shell -b -d 10 \
     "tmux set-option -wq -t '${target_window}' @claude_done ''; \
      tmux set-option -gq @claude_done_msg ''"
@@ -190,6 +197,9 @@ clear_all() {
   log "clear_all target=$target_window"
   tmux set-option -wq -t "$target_window" @claude_waiting ""
   tmux set-option -wq -t "$target_window" @claude_done ""
+  # Reset notify-dedup state too — user has engaged, the next done/waiting
+  # is a fresh state worth a fresh banner.
+  tmux set-option -wq -t "$target_window" @claude_notified_done ""
   # Also dismiss any standing macOS banner — without this, typing in the
   # tmux session clears the tmux pill but leaves the banner in place.
   if command -v terminal-notifier >/dev/null 2>&1; then
