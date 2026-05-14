@@ -78,6 +78,92 @@ The default colors are designed for a green tmux status bar (`bg=green,fg=black`
 
 > **Gotcha:** Don't use commas inside `#[...]` style tags (e.g. `#[fg=red,bold]`). Tmux's `#{?...}` conditional parser treats commas as delimiters. Use separate tags instead: `#[fg=red]#[bold]`.
 
+## macOS notifications (optional)
+
+Get a native banner — with sound, a tap target that switches your tmux client to the firing window, and auto-dismiss when you focus the pane manually.
+
+### Install
+
+```bash
+brew install terminal-notifier
+cp hooks/tmux-claude-status-open.sh  ~/.claude/hooks/
+cp hooks/tmux-claude-status-clear.sh ~/.claude/hooks/
+chmod +x ~/.claude/hooks/tmux-claude-status-*.sh
+cp tmux-claude-status.config.example.json ~/.claude/hooks/tmux-claude-status.config.json
+```
+
+Then edit `~/.claude/hooks/tmux-claude-status.config.json` — set `terminal_app` to your terminal (`Ghostty`, `Terminal`, others may work but only those two are verified — see "Spawn command" below) and adjust copy / sound to taste.
+
+The notifications are **opt-in by config presence**: without `tmux-claude-status.config.json`, or without `terminal-notifier` on `PATH`, the hook script behaves exactly like the upstream original — tmux pills only.
+
+If you didn't already source the full `tmux-claude-status.conf`, add these two lines to `~/.tmux.conf` to enable auto-dismiss (`focus-events on` is required for `pane-focus-in` to actually fire):
+
+```tmux
+set -g focus-events on
+set-hook -g pane-focus-in 'run-shell -b "~/.claude/hooks/tmux-claude-status-clear.sh \"#{session_name}:#{window_index}\""'
+```
+
+### Config
+
+```json
+{
+  "terminal_app": "Ghostty",
+  "suppress_when_focused": true,
+  "waiting": {
+    "title": "Claude Code",
+    "subtitle": "⚠ {target_window}",
+    "message": "Claude needs your input",
+    "sound": "Ping"
+  },
+  "done": {
+    "title": "Claude Code",
+    "subtitle": "✓ {target_window}",
+    "message": "Claude finished",
+    "sound": "Glass"
+  }
+}
+```
+
+`suppress_when_focused` (default `true`) skips the banner when the configured terminal is already the macOS frontmost app **and** an attached tmux client is currently showing the originating window — i.e. you'd see the prompt anyway, no point in a banner. Set to `false` to always banner. Detection uses `lsappinfo` (no Accessibility permission required) plus `tmux list-clients` / `display-message`.
+
+Templatable placeholders in `title` / `subtitle` / `message`: `{target_window}` (e.g. `main:2`), `{session}`, `{window_index}`, `{window_name}` (the tmux window name — defaults to the running command unless you've renamed the window).
+
+Sounds: `Ping`, `Glass`, `Hero`, `Funk`, `Basso`, `Bottle`, `Frog`, `Morse`, `Pop`, `Purr`, `Sosumi`, `Submarine`, `Tink`. Empty / omitted → silent banner.
+
+### Tap behaviour
+
+1. Foregrounds the configured `terminal_app` (always — even when the switch succeeds).
+2. `tmux switch-client -t session:index` — retargets your already-attached tmux client across sessions/windows on the same tmux server.
+3. **Fallback** when no client is attached: runs the configured `spawn_command` (see below) to launch a fresh terminal window with `tmux attach`.
+4. **Dead-session** (target killed since the banner fired): shows a "Session X no longer exists" notification instead of failing silently.
+
+### Spawn command (no-client fallback)
+
+Configurable via `spawn_command` in the JSON config. Templated string with placeholders `{app}`, `{session}`, `{target_window}`, `{window_index}`. Rendered then run via `/bin/sh -c`. If the field is absent, defaults to the Ghostty value below.
+
+**Verified values:**
+
+```jsonc
+// Ghostty (default — no need to set explicitly)
+"spawn_command": "open -na {app} --args -e \"tmux attach -t {session} \\; select-window -t {target_window}\""
+
+// Terminal.app (uses AppleScript do script)
+"spawn_command": "osascript -e 'tell application \"Terminal\" to do script \"tmux attach -t {session} \\; select-window -t {target_window}\"'"
+```
+
+For other terminals (iTerm, Alacritty, Wezterm, Kitty…) you'd need to write your own — the script doesn't ship known-good values for them. If you do work one out, PRs welcome.
+
+### Auto-dismiss
+
+When you focus the originating pane via tmux without tapping the banner, the `pane-focus-in` hook clears the tmux flags and runs `terminal-notifier -remove "claude-$target_window"` to dismiss the Notification Center entry.
+
+### Caveats
+
+- **Multi-window tmux clients.** `switch-client` retargets the most-recently-active client, not a specific terminal-app window. If you run multiple tmux clients side-by-side, you can't pre-select which one switches.
+- **Multi-server tmux.** Only works when your terminal-app's tmux client and Claude Code share a tmux server (same socket / user). Cross-server switches aren't possible.
+- **Glance without focus.** `pane-focus-in` only fires on actual pane focus changes. If you switch to a *window* that already has a non-Claude pane focused, the auto-dismiss won't run — you'd need to focus the Claude pane explicitly. Banners do still clear when Claude itself emits `UserPromptSubmit` / `PostToolUse` after you engage.
+- **Ghostty fallback opens a second instance.** Ghostty's AppleScript dictionary doesn't expose `do script`, so the default `spawn_command` uses `open -na` which spawns a new Ghostty process. The Terminal.app variant doesn't have this issue. Other terminals depend on what `spawn_command` you write.
+
 ## How it works
 
 The hook script receives JSON events from Claude Code and sets tmux window-level options:
